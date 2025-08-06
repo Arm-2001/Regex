@@ -164,6 +164,7 @@ def generate_regex():
             "success": result["success"],
             "prompt": user_prompt,
             "regex": result["regex"],
+            "full_response": result.get("full_response"),  # Add full AI response for frontend extraction
             "timestamp": datetime.now().isoformat()
         }
         
