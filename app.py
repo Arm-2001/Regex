@@ -6,11 +6,11 @@ import re
 import os
 from datetime import datetime
 
-app = Flask(__name__)
+app = Flask(_name_)
 CORS(app)  # Enable CORS for web interface
 
 class SmartRegexGenerator:
-    def __init__(self, api_key):
+    def _init_(self, api_key):
         self.api_key = api_key
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         self.model = "deepseek/deepseek-r1:free"
@@ -18,18 +18,16 @@ class SmartRegexGenerator:
     def generate_regex(self, user_input):
         """Generate regex using DeepSeek R1"""
         
-        prompt = f"""You are a regex expert. Generate a precise regular expression for the following requirement:
+        # Improved prompt that forces better format
+        prompt = f"""You are a regex expert. Create a regular expression for: "{user_input}"
 
-USER REQUEST: "{user_input}"
+IMPORTANT: Respond with ONLY the regex pattern on a single line. No explanations, no formatting, no extra text.
 
-Please provide:
-Only The regex pattern
-Analyze the user prompt and give accurate regex, nothing else than that.
+Examples:
+- For "email addresses": ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{{2,}}$
+- For "phone numbers": ^\(?[0-9]{{3}}\)?[-.\s]?[0-9]{{3}}[-.\s]?[0-9]{{4}}$
 
-Format your response as:
-REGEX: [your regex pattern]
-
-Focus on accuracy and practical usage."""
+Your response should be ONLY the regex pattern."""
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -40,7 +38,7 @@ Focus on accuracy and practical usage."""
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 400
+            "max_tokens": 150
         }
         
         try:
@@ -71,39 +69,152 @@ Focus on accuracy and practical usage."""
             }
     
     def extract_regex_from_response(self, response):
-        """Extract regex pattern from AI response"""
-        # Try to find pattern after "REGEX:" label
-        regex_match = re.search(r'REGEX:\s*(.+)', response, re.IGNORECASE)
-        if regex_match:
-            return regex_match.group(1).strip()
+        """Enhanced regex pattern extraction from AI response"""
         
-        # Fallback: look for content in backticks or code blocks
-        code_match = re.search(r'`([^`]+)`', response)
-        if code_match:
-            return code_match.group(1).strip()
+        # Clean the response
+        cleaned_response = response.strip()
         
-        # Last resort: look for regex-like patterns
-        pattern_match = re.search(r'([\\^$.*+?{}[\]|()\-].*)', response)
-        if pattern_match:
-            return pattern_match.group(1).strip()
+        # Strategy 1: Direct regex pattern (most common with improved prompt)
+        # Look for lines that start with regex characters
+        lines = cleaned_response.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and self.looks_like_regex(line):
+                return line
         
-        return "Could not extract regex pattern"
+        # Strategy 2: Look for patterns in common formats
+        extraction_patterns = [
+            r'REGEX:\s*(.+)',                    # REGEX: pattern
+            r'Pattern:\s*(.+)',                  # Pattern: pattern
+            r'Expression:\s*(.+)',               # Expression: pattern
+            r'([^]+)',                        # `pattern
+            r'(?:regex)?\s*([^`]+)\s*',    # pattern
+            r'/([^/]+)/',                        # /pattern/
+            r'^([\\^$.*+?{}[\]|()\-].+)$',       # Lines starting with regex chars
+            r'([\\^$.*+?{}[\]|()\-]{2,}.+)',     # Any string with multiple regex chars
+        ]
+        
+        for pattern in extraction_patterns:
+            match = re.search(pattern, cleaned_response, re.IGNORECASE | re.MULTILINE)
+            if match:
+                extracted = match.group(1).strip()
+                if self.is_valid_regex(extracted):
+                    return extracted
+        
+        # Strategy 3: Find the longest string that looks like regex
+        potential_patterns = []
+        words = cleaned_response.split()
+        
+        for word in words:
+            if len(word) > 5 and self.looks_like_regex(word):
+                potential_patterns.append(word)
+        
+        if potential_patterns:
+            # Return the longest one (likely the most complete)
+            return max(potential_patterns, key=len)
+        
+        # Strategy 4: Last resort - try to find any regex-like substring
+        regex_chars_pattern = r'[\\^$.+?{}[\]|()\-]{3,}[^\\^$.+?{}[\]|()\-\s]*'
+        matches = re.findall(regex_chars_pattern, cleaned_response)
+        if matches:
+            return matches[0]
+        
+        # Strategy 5: If all else fails, try common patterns based on user input
+        return self.generate_fallback_pattern(cleaned_response)
+    
+    def looks_like_regex(self, text):
+        """Check if text looks like a regex pattern"""
+        if not text or len(text) < 3:
+            return False
+        
+        # Count regex special characters
+        regex_chars = set('\\^$.*+?{}[]|()')
+        regex_char_count = sum(1 for char in text if char in regex_chars)
+        
+        # Should have at least 2 regex characters and reasonable length
+        return regex_char_count >= 2 and len(text) <= 200
+    
+    def is_valid_regex(self, pattern):
+        """Test if the pattern is a valid regex"""
+        try:
+            re.compile(pattern)
+            return True
+        except re.error:
+            return False
+    
+    def generate_fallback_pattern(self, response):
+        """Generate fallback patterns based on common requests"""
+        response_lower = response.lower()
+        
+        fallback_patterns = {
+            'email': r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+            'phone': r'^\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}$',
+            'url': r'https?://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])(?:\?(?:[\w&=%.]))?(?:#(?:\w*))?)?',
+            'ip': r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$',
+            'date': r'^\d{1,2}/\d{1,2}/\d{4}$',
+            'time': r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$',
+            'number': r'^\d+$',
+            'word': r'^[a-zA-Z]+$',
+            'alphanumeric': r'^[a-zA-Z0-9]+$',
+        }
+        
+        for keyword, pattern in fallback_patterns.items():
+            if keyword in response_lower:
+                return pattern
+        
+        # Ultimate fallback
+        return r'.*'
     
     def test_regex(self, pattern, test_string):
         """Test regex pattern against a string"""
         try:
-            matches = re.findall(pattern, test_string)
+            # First validate the regex pattern
+            compiled_pattern = re.compile(pattern)
+            
+            # Find all matches
+            matches = compiled_pattern.findall(test_string)
+            
+            # Also get match objects for more detailed info
+            match_objects = list(compiled_pattern.finditer(test_string))
+            
+            # Prepare detailed matches
+            detailed_matches = []
+            for match_obj in match_objects:
+                if match_obj.groups():
+                    # If there are groups, return the groups
+                    detailed_matches.extend([group for group in match_obj.groups() if group is not None])
+                else:
+                    # If no groups, return the full match
+                    detailed_matches.append(match_obj.group(0))
+            
+            # Use the more detailed matches if available, otherwise use simple findall
+            final_matches = detailed_matches if detailed_matches else matches
+            
             return {
                 "success": True,
-                "matches": matches,
-                "match_count": len(matches),
-                "is_valid": True
+                "matches": final_matches,
+                "match_count": len(final_matches),
+                "is_valid": True,
+                "pattern_info": {
+                    "pattern": pattern,
+                    "flags": "None",
+                    "groups": len(compiled_pattern.groups) if hasattr(compiled_pattern, 'groups') else 0
+                }
             }
         except re.error as e:
             return {
                 "success": False,
-                "error": f"Invalid regex: {str(e)}",
+                "error": f"Invalid regex pattern: {str(e)}",
                 "matches": [],
+                "match_count": 0,
+                "is_valid": False
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Error testing regex: {str(e)}",
+                "matches": [],
+                "match_count": 0,
                 "is_valid": False
             }
 
@@ -114,7 +225,7 @@ if not API_KEY:
     generator = None
 else:
     generator = SmartRegexGenerator(API_KEY)
-    print("✅ Smart Regex Generator initialized")
+    print("✅ Smart Regex Generator initialized with enhanced extraction")
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -123,12 +234,20 @@ def health_check():
         "status": "healthy",
         "service": "Smart AI Regex Generator",
         "powered_by": "DeepSeek R1",
+        "version": "2.0 - Enhanced Extraction",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
             "generate": "/api/generate (POST)",
             "test": "/api/test (POST)",
+            "examples": "/api/examples (GET)",
             "health": "/ (GET)"
-        }
+        },
+        "features": [
+            "Enhanced regex extraction",
+            "Multiple extraction strategies",
+            "Fallback pattern generation",
+            "Improved error handling"
+        ]
     })
 
 @app.route('/api/generate', methods=['POST'])
@@ -137,7 +256,7 @@ def generate_regex():
     if not generator:
         return jsonify({
             "success": False,
-            "error": "API key not configured"
+            "error": "API key not configured. Please set DEEPSEEK_API_KEY environment variable."
         }), 500
     
     try:
@@ -157,6 +276,14 @@ def generate_regex():
                 "error": "Prompt cannot be empty"
             }), 400
         
+        if len(user_prompt) > 500:
+            return jsonify({
+                "success": False,
+                "error": "Prompt too long. Please keep it under 500 characters."
+            }), 400
+        
+        print(f"📝 Generating regex for: '{user_prompt}'")
+        
         # Generate regex
         result = generator.generate_regex(user_prompt)
         
@@ -164,20 +291,25 @@ def generate_regex():
             "success": result["success"],
             "prompt": user_prompt,
             "regex": result["regex"],
-            "full_response": result.get("full_response"),  # Add full AI response for frontend extraction
-            "timestamp": datetime.now().isoformat()
+            "full_response": result.get("full_response"),
+            "timestamp": datetime.now().isoformat(),
+            "extraction_successful": result["regex"] != "Could not extract regex pattern" if result["success"] else False
         }
         
         if not result["success"]:
             response_data["error"] = result["error"]
+            print(f"❌ Generation failed: {result['error']}")
             return jsonify(response_data), 500
         
+        print(f"✅ Generated regex: {result['regex']}")
         return jsonify(response_data)
         
     except Exception as e:
+        error_msg = f"Server error: {str(e)}"
+        print(f"💥 Server error: {error_msg}")
         return jsonify({
             "success": False,
-            "error": f"Server error: {str(e)}",
+            "error": error_msg,
             "timestamp": datetime.now().isoformat()
         }), 500
 
@@ -193,10 +325,20 @@ def test_regex():
                 "error": "Missing 'regex' or 'test_string' in request body"
             }), 400
         
-        regex_pattern = data['regex']
+        regex_pattern = data['regex'].strip()
         test_string = data['test_string']
         
-        if not generator:
+        if not regex_pattern:
+            return jsonify({
+                "success": False,
+                "error": "Regex pattern cannot be empty"
+            }), 400
+        
+        print(f"🧪 Testing regex: '{regex_pattern}' against: '{test_string[:50]}...'")
+        
+        if generator:
+            result = generator.test_regex(regex_pattern, test_string)
+        else:
             # Fallback testing without generator
             try:
                 matches = re.findall(regex_pattern, test_string)
@@ -211,10 +353,9 @@ def test_regex():
                     "success": False,
                     "error": f"Invalid regex: {str(e)}",
                     "matches": [],
+                    "match_count": 0,
                     "is_valid": False
                 }
-        else:
-            result = generator.test_regex(regex_pattern, test_string)
         
         response_data = {
             "success": result["success"],
@@ -226,15 +367,23 @@ def test_regex():
             "timestamp": datetime.now().isoformat()
         }
         
+        if "pattern_info" in result:
+            response_data["pattern_info"] = result["pattern_info"]
+        
         if not result["success"]:
             response_data["error"] = result["error"]
+            print(f"❌ Test failed: {result['error']}")
+        else:
+            print(f"✅ Test successful: {result['match_count']} matches found")
         
         return jsonify(response_data)
         
     except Exception as e:
+        error_msg = f"Server error: {str(e)}"
+        print(f"💥 Test error: {error_msg}")
         return jsonify({
             "success": False,
-            "error": f"Server error: {str(e)}",
+            "error": error_msg,
             "timestamp": datetime.now().isoformat()
         }), 500
 
@@ -245,43 +394,57 @@ def get_examples():
         "email": [
             "Match email addresses",
             "Validate Gmail addresses only",
-            "Email with specific domain validation"
+            "Email with specific domain validation",
+            "Extract all emails from text"
         ],
         "phone": [
             "US phone numbers with area code",
             "International phone format",
-            "Phone numbers with extensions"
+            "Phone numbers with extensions",
+            "Mobile phone numbers only"
         ],
         "dates": [
             "Match dates in MM/DD/YYYY format",
             "European date format DD-MM-YYYY",
-            "ISO date format YYYY-MM-DD"
+            "ISO date format YYYY-MM-DD",
+            "Flexible date formats"
         ],
         "web": [
             "Extract URLs from text",
             "Match IPv4 addresses",
-            "Find domain names"
+            "Find domain names",
+            "HTTPS URLs only"
         ],
         "finance": [
             "Credit card numbers",
             "US social security numbers",
-            "Bank account numbers"
+            "Bank account numbers",
+            "Currency amounts"
         ],
         "text": [
             "Words starting with capital letter",
             "Extract hashtags from text",
-            "Match alphanumeric codes"
+            "Match alphanumeric codes",
+            "Find quoted text"
         ],
         "security": [
             "Strong password validation",
             "Extract IP addresses from logs",
-            "API key patterns"
+            "API key patterns",
+            "UUID format validation"
+        ],
+        "validation": [
+            "Validate username format",
+            "Check postal codes",
+            "Verify file extensions",
+            "Match specific patterns"
         ]
     }
     
     return jsonify({
         "examples": examples,
         "total_categories": len(examples),
+        "total_examples": sum(len(prompts) for prompts in examples.values()),
         "timestamp": datetime.now().isoformat()
     })
 
@@ -290,16 +453,25 @@ def not_found(error):
     return jsonify({
         "success": False,
         "error": "Endpoint not found",
-        "available_endpoints": ["/", "/api/generate", "/api/test", "/api/examples"]
+        "available_endpoints": ["/", "/api/generate", "/api/test", "/api/examples"],
+        "timestamp": datetime.now().isoformat()
     }), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     return jsonify({
         "success": False,
-        "error": "Internal server error"
+        "error": "Internal server error",
+        "timestamp": datetime.now().isoformat()
     }), 500
 
-if __name__ == '__main__':
+if _name_ == '_main_':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
+    
+    print(f"🚀 Starting Smart Regex Generator on port {port}")
+    print(f"🔧 Debug mode: {debug_mode}")
+    print(f"🤖 Model: deepseek/deepseek-r1:free")
+    print(f"🔑 API Key configured: {'Yes' if API_KEY else 'No'}")
+    
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
