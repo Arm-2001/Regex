@@ -6,11 +6,11 @@ import re
 import os
 from datetime import datetime
 
-app = Flask(__name__)
+app = Flask(_name_)
 CORS(app)  # Enable CORS for web interface
 
 class SmartRegexGenerator:
-    def __init__(self, api_key):
+    def _init_(self, api_key):
         self.api_key = api_key
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         self.model = "deepseek/deepseek-r1:free"
@@ -24,8 +24,8 @@ class SmartRegexGenerator:
 IMPORTANT: Respond with ONLY the regex pattern on a single line. No explanations, no formatting, no extra text.
 
 Examples:
-- For "email addresses": ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{{2,}}$
-- For "phone numbers": ^\\(?[0-9]{{3}}\\)?[-\\.\\s]?[0-9]{{3}}[-\\.\\s]?[0-9]{{4}}$
+- For "email addresses": ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{{2,}}$
+- For "phone numbers": ^\(?[0-9]{{3}}\)?[-.\s]?[0-9]{{3}}[-.\s]?[0-9]{{4}}$
 
 Your response should be ONLY the regex pattern."""
 
@@ -87,8 +87,8 @@ Your response should be ONLY the regex pattern."""
             r'REGEX:\s*(.+)',                    # REGEX: pattern
             r'Pattern:\s*(.+)',                  # Pattern: pattern
             r'Expression:\s*(.+)',               # Expression: pattern
-            r'`([^`]+)`',                        # `pattern`
-            r'(?:regex)?\s*`([^`]+)`\s*',        # `pattern`
+            r'([^]+)',                        # `pattern
+            r'(?:regex)?\s*([^`]+)\s*',    # pattern
             r'/([^/]+)/',                        # /pattern/
             r'^([\\^$.*+?{}[\]|()\-].+)$',       # Lines starting with regex chars
             r'([\\^$.*+?{}[\]|()\-]{2,}.+)',     # Any string with multiple regex chars
@@ -149,7 +149,7 @@ Your response should be ONLY the regex pattern."""
         fallback_patterns = {
             'email': r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
             'phone': r'^\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}$',
-            'url': r'https?://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.]*))?(?:#(?:\w*))?)?',
+            'url': r'https?://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])(?:\?(?:[\w&=%.]))?(?:#(?:\w*))?)?',
             'ip': r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$',
             'date': r'^\d{1,2}/\d{1,2}/\d{4}$',
             'time': r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$',
@@ -465,7 +465,7 @@ def internal_error(error):
         "timestamp": datetime.now().isoformat()
     }), 500
 
-if __name__ == '__main__':
+if _name_ == '_main_':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
     
