@@ -198,7 +198,7 @@ Your response should be ONLY the regex pattern."""
                 "pattern_info": {
                     "pattern": pattern,
                     "flags": "None",
-                    "groups": len(compiled_pattern.groups) if hasattr(compiled_pattern, 'groups') else 0
+                    "groups": compiled_pattern.groups
                 }
             }
         except re.error as e:
