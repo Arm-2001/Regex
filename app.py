@@ -18,16 +18,18 @@ class SmartRegexGenerator:
     def generate_regex(self, user_input):
         """Generate regex using DeepSeek R1"""
         
-        # Improved prompt that forces better format
-        prompt = f"""You are a regex expert. Create a regular expression for: "{user_input}"
+        prompt = f"""You are a regex expert. Generate a precise regular expression for the following requirement:
 
-IMPORTANT: Respond with ONLY the regex pattern on a single line. No explanations, no formatting, no extra text.
+USER REQUEST: "{user_input}"
 
-Examples:
-- For "email addresses": ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{{2,}}$
-- For "phone numbers": ^\\(?[0-9]{{3}}\\)?[-\\.\\s]?[0-9]{{3}}[-\\.\\s]?[0-9]{{4}}$
+Please provide:
+Only The regex pattern
+Analyze the user prompt and give accurate regex, nothing else than that.
 
-Your response should be ONLY the regex pattern."""
+Format your response as:
+REGEX: [your regex pattern]
+
+Focus on accuracy and practical usage."""
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -38,16 +40,21 @@ Your response should be ONLY the regex pattern."""
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 150
+            "max_tokens": 400
         }
         
         try:
+            print(f"🔑 Making API call to: {self.base_url}")
             response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
+            print(f"📡 API Response Status: {response.status_code}")
             response.raise_for_status()
             
             result = response.json()
             ai_response = result['choices'][0]['message']['content']
+            print(f"🤖 AI Raw Response: '{ai_response}'")
+            
             regex_pattern = self.extract_regex_from_response(ai_response)
+            print(f"🎯 Extracted Pattern: '{regex_pattern}'")
             
             return {
                 "success": True,
@@ -56,12 +63,14 @@ Your response should be ONLY the regex pattern."""
             }
             
         except requests.exceptions.RequestException as e:
+            print(f"❌ API Request Error: {str(e)}")
             return {
                 "success": False,
                 "error": f"API Request failed: {str(e)}",
                 "regex": None
             }
         except Exception as e:
+            print(f"❌ Unexpected Error: {str(e)}")
             return {
                 "success": False,
                 "error": f"Unexpected error: {str(e)}",
@@ -69,83 +78,43 @@ Your response should be ONLY the regex pattern."""
             }
     
     def extract_regex_from_response(self, response):
-        """Enhanced regex pattern extraction from AI response"""
-        
+        """Extract regex pattern from AI response"""
         # Clean the response
         cleaned_response = response.strip()
         
-        # Strategy 1: Direct regex pattern (most common with improved prompt)
-        # Look for lines that start with regex characters
-        lines = cleaned_response.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line and self.looks_like_regex(line):
-                return line
+        print(f"🔍 Extracting regex from: '{cleaned_response}'")
         
-        # Strategy 2: Look for patterns in common formats
-        extraction_patterns = [
-            r'REGEX:\s*(.+)',                    # REGEX: pattern
-            r'Pattern:\s*(.+)',                  # Pattern: pattern
-            r'Expression:\s*(.+)',               # Expression: pattern
-            r'`([^`]+)`',                        # `pattern`
-            r'(?:regex)?\s*`([^`]+)`\s*',        # `pattern`
-            r'/([^/]+)/',                        # /pattern/
-            r'^([\\^$.*+?{}[\]|()\-].+)$',       # Lines starting with regex chars
-            r'([\\^$.*+?{}[\]|()\-]{2,}.+)',     # Any string with multiple regex chars
-        ]
+        # Strategy 1: Try to find pattern after "REGEX:" label
+        regex_match = re.search(r'REGEX:\s*(.+)', response, re.IGNORECASE)
+        if regex_match:
+            extracted = regex_match.group(1).strip()
+            print(f"✅ Found with REGEX: label: {extracted}")
+            return extracted
         
-        for pattern in extraction_patterns:
-            match = re.search(pattern, cleaned_response, re.IGNORECASE | re.MULTILINE)
-            if match:
-                extracted = match.group(1).strip()
-                if self.is_valid_regex(extracted):
-                    return extracted
+        # Strategy 2: Look for content in backticks
+        code_match = re.search(r'`([^`]+)`', response)
+        if code_match:
+            extracted = code_match.group(1).strip()
+            print(f"✅ Found in backticks: {extracted}")
+            return extracted
         
-        # Strategy 3: Find the longest string that looks like regex
-        potential_patterns = []
-        words = cleaned_response.split()
+        # Strategy 3: Look for regex-like patterns
+        pattern_match = re.search(r'([\\^$.*+?{}[\]|()\-].*)', response)
+        if pattern_match:
+            extracted = pattern_match.group(1).strip()
+            print(f"✅ Found regex-like pattern: {extracted}")
+            return extracted
         
-        for word in words:
-            if len(word) > 5 and self.looks_like_regex(word):
-                potential_patterns.append(word)
-        
-        if potential_patterns:
-            # Return the longest one (likely the most complete)
-            return max(potential_patterns, key=len)
-        
-        # Strategy 4: Last resort - try to find any regex-like substring
-        regex_chars_pattern = r'[\\^$.+?{}[\]|()\-]{3,}[^\\^$.+?{}[\]|()\-\s]*'
-        matches = re.findall(regex_chars_pattern, cleaned_response)
-        if matches:
-            return matches[0]
-        
-        # Strategy 5: If all else fails, try common patterns based on user input
-        return self.generate_fallback_pattern(cleaned_response)
-    
-    def looks_like_regex(self, text):
-        """Check if text looks like a regex pattern"""
-        if not text or len(text) < 3:
-            return False
-        
-        # Count regex special characters
-        regex_chars = set('\\^$.*+?{}[]|()')
-        regex_char_count = sum(1 for char in text if char in regex_chars)
-        
-        # Should have at least 2 regex characters and reasonable length
-        return regex_char_count >= 2 and len(text) <= 200
-    
-    def is_valid_regex(self, pattern):
-        """Test if the pattern is a valid regex"""
-        try:
-            re.compile(pattern)
-            return True
-        except re.error:
-            return False
+        # Strategy 4: Try to extract based on user input context (enhanced fallback)
+        return self.generate_fallback_pattern(response)
     
     def generate_fallback_pattern(self, response):
         """Generate fallback patterns based on common requests"""
         response_lower = response.lower()
         
+        print(f"🔍 Looking for fallback pattern for: '{response_lower}'")
+        
+        # Enhanced fallback patterns with better detection
         fallback_patterns = {
             'email': r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
             'phone': r'^\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}$',
@@ -156,55 +125,37 @@ Your response should be ONLY the regex pattern."""
             'number': r'^\d+$',
             'word': r'^[a-zA-Z]+$',
             'alphanumeric': r'^[a-zA-Z0-9]+$',
+            'password': r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$',
+            'uuid': r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+            'credit card': r'^\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}$',
+            'zip': r'^\d{5}(-\d{4})?$',
+            'ssn': r'^\d{3}-\d{2}-\d{4}$',
         }
         
+        # Check if the response contains common patterns
         for keyword, pattern in fallback_patterns.items():
             if keyword in response_lower:
+                print(f"✅ Found fallback pattern for '{keyword}': {pattern}")
                 return pattern
         
-        # Ultimate fallback
-        return r'.*'
+        # If no pattern found, return the error message for frontend to handle
+        print("⚠️ Could not extract regex pattern")
+        return "Could not extract regex pattern"
     
     def test_regex(self, pattern, test_string):
         """Test regex pattern against a string"""
         try:
-            # First validate the regex pattern
-            compiled_pattern = re.compile(pattern)
-            
-            # Find all matches
-            matches = compiled_pattern.findall(test_string)
-            
-            # Also get match objects for more detailed info
-            match_objects = list(compiled_pattern.finditer(test_string))
-            
-            # Prepare detailed matches
-            detailed_matches = []
-            for match_obj in match_objects:
-                if match_obj.groups():
-                    # If there are groups, return the groups
-                    detailed_matches.extend([group for group in match_obj.groups() if group is not None])
-                else:
-                    # If no groups, return the full match
-                    detailed_matches.append(match_obj.group(0))
-            
-            # Use the more detailed matches if available, otherwise use simple findall
-            final_matches = detailed_matches if detailed_matches else matches
-            
+            matches = re.findall(pattern, test_string)
             return {
                 "success": True,
-                "matches": final_matches,
-                "match_count": len(final_matches),
-                "is_valid": True,
-                "pattern_info": {
-                    "pattern": pattern,
-                    "flags": "None",
-                    "groups": compiled_pattern.groups
-                }
+                "matches": matches,
+                "match_count": len(matches),
+                "is_valid": True
             }
         except re.error as e:
             return {
                 "success": False,
-                "error": f"Invalid regex pattern: {str(e)}",
+                "error": f"Invalid regex: {str(e)}",
                 "matches": [],
                 "match_count": 0,
                 "is_valid": False
@@ -225,7 +176,7 @@ if not API_KEY:
     generator = None
 else:
     generator = SmartRegexGenerator(API_KEY)
-    print("✅ Smart Regex Generator initialized with enhanced extraction")
+    print("✅ Smart Regex Generator initialized")
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -234,20 +185,13 @@ def health_check():
         "status": "healthy",
         "service": "Smart AI Regex Generator",
         "powered_by": "DeepSeek R1",
-        "version": "2.0 - Enhanced Extraction",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
             "generate": "/api/generate (POST)",
             "test": "/api/test (POST)",
             "examples": "/api/examples (GET)",
             "health": "/ (GET)"
-        },
-        "features": [
-            "Enhanced regex extraction",
-            "Multiple extraction strategies",
-            "Fallback pattern generation",
-            "Improved error handling"
-        ]
+        }
     })
 
 @app.route('/api/generate', methods=['POST'])
@@ -276,24 +220,18 @@ def generate_regex():
                 "error": "Prompt cannot be empty"
             }), 400
         
-        if len(user_prompt) > 500:
-            return jsonify({
-                "success": False,
-                "error": "Prompt too long. Please keep it under 500 characters."
-            }), 400
-        
         print(f"📝 Generating regex for: '{user_prompt}'")
         
         # Generate regex
         result = generator.generate_regex(user_prompt)
         
+        # Frontend expects these exact fields
         response_data = {
             "success": result["success"],
             "prompt": user_prompt,
             "regex": result["regex"],
-            "full_response": result.get("full_response"),
-            "timestamp": datetime.now().isoformat(),
-            "extraction_successful": result["regex"] != "Could not extract regex pattern" if result["success"] else False
+            "full_response": result.get("full_response", ""),
+            "timestamp": datetime.now().isoformat()
         }
         
         if not result["success"]:
@@ -357,6 +295,7 @@ def test_regex():
                     "is_valid": False
                 }
         
+        # Frontend expects these exact fields
         response_data = {
             "success": result["success"],
             "regex": regex_pattern,
@@ -366,9 +305,6 @@ def test_regex():
             "is_valid": result.get("is_valid", False),
             "timestamp": datetime.now().isoformat()
         }
-        
-        if "pattern_info" in result:
-            response_data["pattern_info"] = result["pattern_info"]
         
         if not result["success"]:
             response_data["error"] = result["error"]
@@ -394,57 +330,43 @@ def get_examples():
         "email": [
             "Match email addresses",
             "Validate Gmail addresses only",
-            "Email with specific domain validation",
-            "Extract all emails from text"
+            "Email with specific domain validation"
         ],
         "phone": [
             "US phone numbers with area code",
             "International phone format",
-            "Phone numbers with extensions",
-            "Mobile phone numbers only"
+            "Phone numbers with extensions"
         ],
         "dates": [
             "Match dates in MM/DD/YYYY format",
             "European date format DD-MM-YYYY",
-            "ISO date format YYYY-MM-DD",
-            "Flexible date formats"
+            "ISO date format YYYY-MM-DD"
         ],
         "web": [
             "Extract URLs from text",
             "Match IPv4 addresses",
-            "Find domain names",
-            "HTTPS URLs only"
+            "Find domain names"
         ],
         "finance": [
             "Credit card numbers",
             "US social security numbers",
-            "Bank account numbers",
-            "Currency amounts"
+            "Bank account numbers"
         ],
         "text": [
             "Words starting with capital letter",
             "Extract hashtags from text",
-            "Match alphanumeric codes",
-            "Find quoted text"
+            "Match alphanumeric codes"
         ],
         "security": [
             "Strong password validation",
             "Extract IP addresses from logs",
-            "API key patterns",
-            "UUID format validation"
-        ],
-        "validation": [
-            "Validate username format",
-            "Check postal codes",
-            "Verify file extensions",
-            "Match specific patterns"
+            "API key patterns"
         ]
     }
     
     return jsonify({
         "examples": examples,
         "total_categories": len(examples),
-        "total_examples": sum(len(prompts) for prompts in examples.values()),
         "timestamp": datetime.now().isoformat()
     })
 
